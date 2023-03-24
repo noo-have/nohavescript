@@ -15,7 +15,7 @@ mod test_all {
     mod parser_test {
         #[test]
         fn parser() {
-            let mut p = crate::parser::Parser::new("true+\nfalse");
+            let mut p = crate::parser::Parser::new("(4+3,\"1\",2)");
             p.start();
         }
     }

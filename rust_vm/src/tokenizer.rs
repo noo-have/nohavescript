@@ -65,11 +65,14 @@ impl Tokenizer {
                 (reg!(r"^[\x20]+"), TokenType::空格),
                 (reg!(r"^(\-)?\d+(\.\d+)?"), TokenType::数字字面量),
                 (
-                    reg!(r"^(>=|<=|\+|->|-|\*\*|\*|\/|=>|==|=|&&|\?\?|\|\|)"),
+                    reg!(r"^(>=|<=|\+|->|-|\*\*|\*|\/|=>|==|=|&&|\?\?|\|\||,)"),
                     TokenType::运算符,
                 ),
                 (reg!(r"^(true|false)(?=\b)"), TokenType::布尔值),
                 (reg!(r"^[a-zA-Z_][a-zA-Z0-9_]*"), TokenType::标识符),
+                (reg!(r"^\("), TokenType::左括号),
+                (reg!(r"^\)"), TokenType::右括号),
+                (reg!("^\"[^\"]*\""), TokenType::字符串),
             ],
         }
     }
@@ -77,6 +80,7 @@ impl Tokenizer {
 #[derive(Clone, PartialEq)]
 #[cfg_attr(debug_assertions, derive(Debug))]
 pub enum TokenType {
+    字符串,
     符号,
     单行注释,
     块注释,
@@ -89,6 +93,8 @@ pub enum TokenType {
     结束,
     运算符,
     布尔值,
+    左括号,
+    右括号,
 }
 #[derive(Clone)]
 #[cfg_attr(debug_assertions, derive(Debug))]
