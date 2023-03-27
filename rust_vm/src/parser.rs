@@ -1,5 +1,8 @@
 //! 解析器模块
-use crate::tokenizer::{Token, TokenType, Tokenizer};
+use crate::{
+    analysis,
+    tokenizer::{Token, TokenType, Tokenizer},
+};
 
 #[cfg_attr(debug_assertions, derive(Debug))]
 pub enum Stat {
@@ -13,37 +16,60 @@ pub enum Expr {
         line: i32,
     },
     元组 {
-        elements: Box<Vec<Expr>>,
+        elements: Vec<Expr>,
+    },
+    标识符 {
+        value: String,
+        column: i32,
+        line: i32,
     },
     二元表达式 {
         operator: Token,
         left: Box<Expr>,
         right: Box<Expr>,
     },
+    赋值表达式 {
+        operator: Token,
+        left: Box<Expr>,
+        right: Box<Expr>,
+    },
 }
-pub enum Node {}
+// pub enum Node {}
 pub struct Parser {
     pub line: i32,
     pub column: i32,
     pub tokenizer: Tokenizer,
     pub now_token: Token,
-    pub AST: Vec<Stat>,
+    pub ast: Vec<Stat>,
     pub tokens: Vec<Token>,
+    pub gen_bytecode: bool,
+    pub translate: bool,
 }
 impl Parser {
-    pub fn remake(mut self, str: &str) -> Self {
-        self = Parser::new(str);
-        self
-    }
     /// 启动解析
     pub fn start(&mut self) {
         while let Some(token) = self.get_next_token() {
+            if let TokenType::结束 = token.token_type {
+                continue;
+            }
             self.now_token = token;
             self.line = self.now_token.line;
             self.column = self.now_token.column;
             self.parse();
         }
-        crate::debug!("{:#?}", self.AST);
+        crate::debug!("{:#?}", self.ast);
+    }
+    /// 让编译器生成字节码
+    pub fn set_gen_bytecode(&mut self, gen_bytecode: bool) {
+        self.gen_bytecode = gen_bytecode
+    }
+    /// 让编译器转译js
+    pub fn set_translate(&mut self, translate: bool) {
+        self.translate = translate
+    }
+    /// 设置新的ns代码,重置分词器
+    pub fn set_source_code(&mut self, source_code: &str) {
+        self.tokenizer = Tokenizer::new(source_code)
     }
     pub fn new(str: &str) -> Self {
         Parser {
@@ -56,15 +82,18 @@ impl Parser {
                 line: 0,
                 column: 0,
             },
-            AST: vec![],
+            ast: vec![],
             tokens: vec![],
+            gen_bytecode: false,
+            translate: false,
         }
     }
     /// 解析入口
     pub fn parse(&mut self) {
         crate::debug!("{:#?}", self.now_token,);
         let stat = self.parse_stat();
-        self.AST.push(stat);
+        analysis::analysis(&stat);
+        self.ast.push(stat);
     }
     /// 拿取下一个token,并且将parser的各项数据与新token对齐
     fn eat_token(&mut self) {
@@ -72,8 +101,8 @@ impl Parser {
         self.now_token = self.get_next_token().unwrap_or_else(|| Token {
             token_type: TokenType::结束,
             value: " ".to_string(),
-            line: 0,
-            column: 0,
+            line: self.now_token.line,
+            column: self.now_token.column,
         });
         self.line = self.now_token.line;
         self.column = self.now_token.column;
@@ -146,6 +175,14 @@ impl Parser {
         if self.match_token_value(&["let"]) {
             // 变量声明语句
             todo!()
+        } else if self.match_token_value(&["while"]) {
+            todo!()
+        } else if self.match_token_value(&["for"]) {
+            todo!()
+        } else if self.match_token_value(&["type"]) {
+            todo!()
+        } else if self.match_token_value(&["enum"]) {
+            todo!()
         } else {
             // 以上条件都不满足说明是表达式语句
             Stat::表达式语句 {
@@ -155,8 +192,9 @@ impl Parser {
     }
     /// 解析表达式的入口
     pub fn parse_expr(&mut self) -> Expr {
-        self.term()
+        self.assignment()
     }
+    /// 乘除表达式
     fn factor(&mut self) -> Expr {
         let mut expr: Expr = self.primary_expr();
         while self.match_token_value(&["*", "/"]) {
@@ -170,6 +208,7 @@ impl Parser {
         }
         expr
     }
+    /// 加减表达式
     fn term(&mut self) -> Expr {
         // 加减法优先级很低
         // 首先调用乘法解析,之后的表达式都会递归解析
@@ -192,11 +231,24 @@ impl Parser {
         }
         expr
     }
+    /// 赋值表达式
+    fn assignment(&mut self) -> Expr {
+        let mut expr = self.term();
+        while self.match_token_value(&["="]) {
+            let operator = self.get_previous_token();
+            let right = self.assignment();
+            expr = Expr::赋值表达式 {
+                operator,
+                left: Box::new(expr),
+                right: Box::new(right),
+            };
+        }
+        expr
+    }
     /// ### 优先级最高,基本表达式
     pub fn primary_expr(&mut self) -> Expr {
         if self.match_token_type(TokenType::数字字面量)
             || self.match_token_type(TokenType::布尔值)
-            || self.match_token_type(TokenType::标识符)
             || self.match_token_type(TokenType::字符串)
         {
             let Token {
@@ -210,19 +262,27 @@ impl Parser {
                 column: *column,
                 line: *line,
             }
+        } else if self.match_token_type(TokenType::标识符) {
+            let Token {
+                value,
+                column,
+                line,
+                ..
+            } = &self.get_previous_token();
+            Expr::标识符 {
+                value: value.to_string(),
+                column: *column,
+                line: *line,
+            }
         } else if self.match_token_type(TokenType::左括号) {
             let expr = self.parse_expr();
             if self.match_token_value(&[","]) {
                 let mut tuple = vec![expr];
                 while !self.match_token_type(TokenType::右括号) {
-                    let expr = self.parse_expr();
-                    println!("{:?}", expr);
-                    tuple.push(expr);
+                    tuple.push(self.parse_expr());
                     self.match_token_value(&[","]);
                 }
-                Expr::元组 {
-                    elements: Box::new(tuple),
-                }
+                Expr::元组 { elements: tuple }
             } else {
                 self.consume_token_type(TokenType::右括号);
                 expr
