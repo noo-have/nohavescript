@@ -165,8 +165,8 @@ impl NsValue {
     ///
     /// 用处1: 加速变量写入.
     /// n次哈希表插入操作被优化为1次插入+n-1次解引用指针操作
-    fn as_ptr(&mut self) -> *mut NsValue {
-        self as *mut NsValue
+    fn as_mut_ptr(&mut self) -> *mut Self {
+        self as *mut Self
     }
 }
 #[derive(Default)]
