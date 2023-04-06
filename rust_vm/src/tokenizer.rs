@@ -63,9 +63,15 @@ impl Tokenizer {
                 (reg!(r"^\/\*([^*]|\*+[^*/])*\*+\/"), TokenType::块注释),
                 (reg!(r"^\r?\n|(?<!\n)\r"), TokenType::换行符),
                 (reg!(r"^[\x20]+"), TokenType::空格),
+                (
+                    reg!(r"^(return|let|const|match|if|else|fn|while|for|in|\_)"),
+                    TokenType::关键字,
+                ),
                 (reg!(r"^(\-)?\d+(\.\d+)?"), TokenType::数字字面量),
                 (
-                    reg!(r"^(>=|<=|\+|->|-|\*\*|\*|\/|=>|==|=|&&|\?\?|\|\||,)"),
+                    reg!(
+                        r"^(\:\:|>=|<=|\+|->|-|\>|\<|\*\*|\*|\/|=>|==|=|&&|\!|\|\||\,|\;|\:|\{|\})"
+                    ),
                     TokenType::运算符,
                 ),
                 (reg!(r"^(true|false)(?=\b)"), TokenType::布尔值),
