@@ -98,28 +98,36 @@ fn read_line() -> Result<String, String> {
 #[cfg(test)]
 mod test_all {
     mod parser_test {
-        use crate::debug;
 
         #[test]
         fn parser_元组() {
             let mut p = crate::parser::Parser::new("(42+3,\"1\",2)");
-            p.start();
+            p.start().unwrap();
         }
         #[test]
-        fn parser_二元表达式() {
+        fn parse_二元表达式() {
             let mut p = crate::parser::Parser::new("1+2");
-            p.start();
+            p.start().unwrap();
         }
         #[test]
-        fn parser_块语句() {
+        fn parse_块语句() {
             let mut p = crate::parser::Parser::new("{1+2;23}");
-            p.start();
+            p.start().unwrap();
         }
         #[test]
-        fn parser_单元() {
-            let mut p = crate::parser::Parser::new("0+()+(1*3)");
-            p.start();
-            debug!("{:#?}", p.ast);
+        fn parse_单元() {
+            let mut p = crate::parser::Parser::new("(((2,)))+()  ");
+            p.start().unwrap();
+        }
+        #[test]
+        fn parse_let_stat() {
+            let mut p = crate::parser::Parser::new("let l = 2");
+            p.start().unwrap();
+        }
+        #[test]
+        fn parse_type_literal() {
+            let mut p = crate::parser::Parser::new("let l:P<w,(l,p)> = 2");
+            p.start().unwrap();
         }
     }
     mod analyzer_test {
@@ -128,8 +136,8 @@ mod test_all {
         #[test]
         fn analyzer() -> Result<(), String> {
             let mut analyzer = Analyzer::new();
-            let mut parser = Parser::new("1");
-            parser.start();
+            let mut parser = Parser::new("s");
+            parser.start().unwrap();
             for stat in parser.ast {
                 analyzer.analysis_stat(&stat)?;
             }
