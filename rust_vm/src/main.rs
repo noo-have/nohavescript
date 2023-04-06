@@ -1,11 +1,11 @@
-mod analysis;
+mod analyzer;
 mod bytecode;
 mod error;
 mod macros;
 mod parser;
 mod tokenizer;
 mod translate;
-mod type_check;
+// mod type_check;
 mod vm;
 fn main() {
     debug!("{}", std::mem::size_of::<NsType>());
@@ -52,9 +52,8 @@ fn main() {
 use std::io::Write;
 
 use fancy_regex::Regex;
-use type_check::NsType;
 
-use crate::parser::Parser;
+use crate::{analyzer::NsType, parser::Parser};
 
 fn repl() -> Result<(), String> {
     let mut parser = Parser::new("");
@@ -99,10 +98,42 @@ fn read_line() -> Result<String, String> {
 #[cfg(test)]
 mod test_all {
     mod parser_test {
+        use crate::debug;
+
         #[test]
-        fn parser() {
-            let mut p = crate::parser::Parser::new("(4+3,\"1\",2)");
+        fn parser_元组() {
+            let mut p = crate::parser::Parser::new("(42+3,\"1\",2)");
             p.start();
+        }
+        #[test]
+        fn parser_二元表达式() {
+            let mut p = crate::parser::Parser::new("1+2");
+            p.start();
+        }
+        #[test]
+        fn parser_块语句() {
+            let mut p = crate::parser::Parser::new("{1+2;23}");
+            p.start();
+        }
+        #[test]
+        fn parser_单元() {
+            let mut p = crate::parser::Parser::new("0+()+(1*3)");
+            p.start();
+            debug!("{:#?}", p.ast);
+        }
+    }
+    mod analyzer_test {
+        use crate::{analyzer::Analyzer, parser::Parser};
+
+        #[test]
+        fn analyzer() -> Result<(), String> {
+            let mut analyzer = Analyzer::new();
+            let mut parser = Parser::new("1");
+            parser.start();
+            for stat in parser.ast {
+                analyzer.analysis_stat(&stat)?;
+            }
+            Ok(())
         }
     }
     mod vm_test {
