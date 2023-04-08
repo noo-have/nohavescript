@@ -79,7 +79,6 @@ fn repl() -> Result<(), String> {
 }
 
 fn respond(line: &str, parser: &mut Parser) -> Result<bool, String> {
-    // let args = shlex::split(line).ok_or("error: Invalid quoting")?;
     parser.set_source_code(line);
     parser.start();
     Ok(false)
@@ -111,7 +110,7 @@ mod test_all {
         }
         #[test]
         fn parse_块语句() {
-            let mut p = crate::parser::Parser::new("{1+2;23}");
+            let mut p = crate::parser::Parser::new("{}{1+2;23}");
             p.start().unwrap();
         }
         #[test]
@@ -121,12 +120,17 @@ mod test_all {
         }
         #[test]
         fn parse_let_stat() {
-            let mut p = crate::parser::Parser::new("let l = 2");
+            let mut p = crate::parser::Parser::new("let as::w = 2");
             p.start().unwrap();
         }
         #[test]
         fn parse_type_literal() {
             let mut p = crate::parser::Parser::new("let l:P<w,(l,p)> = 2");
+            p.start().unwrap();
+        }
+        #[test]
+        fn parse_type_def() {
+            let mut p = crate::parser::Parser::new("type k = {d:i32}");
             p.start().unwrap();
         }
     }
@@ -136,7 +140,8 @@ mod test_all {
         #[test]
         fn analyzer() -> Result<(), String> {
             let mut analyzer = Analyzer::new();
-            let mut parser = Parser::new("s");
+            let mut parser =
+                Parser::new("type s<T> = bool;type d<e,u> = s<u>;let f:d<_,bool> = 32;");
             parser.start().unwrap();
             for stat in parser.ast {
                 analyzer.analysis_stat(&stat)?;
