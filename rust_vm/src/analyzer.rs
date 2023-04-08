@@ -191,16 +191,23 @@ impl Analyzer {
                                 self.assign_generic(name, type_args)?
                             }
                             TypeLiteral::Tuple(_) => todo!(),
-                            TypeLiteral::Infer => NsType::Unknown(0),
+                            TypeLiteral::Infer => NsType::Unknown(1),
                             // 最简单的情况，直接去作用域里找
-                            TypeLiteral::Normal(id) => self.now_scope.borrow().get_ns_type(id)?,
+                            TypeLiteral::Normal(id) => {
+                                let result = self.now_scope.borrow().get_ns_type(id)?;
+                                if matches!(result, NsType::Generic(..)) {
+                                    Err("类型 ".to_string() + id + " 是泛型但你没给参数")?
+                                } else {
+                                    result
+                                }
+                            }
                             TypeLiteral::ObjLiteral(_) => todo!(),
                         }
                     } else {
-                        NsType::Unknown(0)
+                        NsType::Unknown(1)
                     };
                     println!("result:::{result:?}");
-                    todo!()
+                    Ok(())
                 }
             }
             Stat::函数声明语句 {
@@ -297,7 +304,7 @@ impl Analyzer {
         type_literal_args: &[TypeLiteral],
     ) -> Result<NsType, String> {
         let gen_type = self.now_scope.borrow().get_ns_type(type_name)?;
-        if let NsType::Generic(_type /* 被Generic包装的原类型 */, len) = gen_type {
+        if let NsType::Generic(ns_type /* 被Generic包装的原类型 */, len) = gen_type {
             if type_literal_args.len() != len.into() {
                 Err("类型 ".to_string() + type_name + " 的泛型参数数量不对")
             } else {
@@ -307,7 +314,7 @@ impl Analyzer {
                     .map(|type_literal| self.analysis_type_literal(type_literal))
                     .collect::<Result<Vec<_>, _>>()?;
                 // 因为上文已经判断过参数数量了,因此下文 unsafe 的索引操作总是安全的
-                match *_type {
+                match *ns_type {
                     // 对应 type A<T> = T
                     // 因此直接找到 type_args 的相应位置替换即可
                     NsType::Unknown(index) => {
@@ -323,12 +330,17 @@ impl Analyzer {
                                 result.push(unsafe {
                                     type_args.get_unchecked((*index - 1) as usize).clone()
                                 });
-                            } else if let NsType::Generic(..) = _type {
+                            } else if let NsType::Generic(__type, _) = _type {
                                 // 如果是泛型
                                 // 用辅助函数递归解析之
+                                result.push(self.assign_generic_type(
+                                    __type.as_ref().clone(),
+                                    type_literal_args,
+                                )?);
+                            } else if Analyzer::is_gen_type(_type) {
                                 result.push(
                                     self.assign_generic_type(_type.clone(), type_literal_args)?,
-                                );
+                                )
                             } else {
                                 // 既不是泛型也不是泛型参数
                                 // 说明是一个已知类型
@@ -341,8 +353,8 @@ impl Analyzer {
                     NsType::Array(_) => todo!(),
                     NsType::Object(_) => todo!(),
                     // 对应 type A<T> = ...;type B<T> = A<T> 这种情况
-                    NsType::Generic(..) => {
-                        Ok(self.assign_generic_type(_type.as_ref().clone(), type_literal_args)?)
+                    NsType::Generic(ref ns_type, _) => {
+                        Ok(self.assign_generic_type(ns_type.as_ref().clone(), type_literal_args)?)
                     }
                     // 以下对应 type A<T> = 基本类型
                     NsType::Bool => Ok(NsType::Bool),
@@ -363,43 +375,50 @@ impl Analyzer {
         gen_type: NsType,
         type_literal_args: &[TypeLiteral],
     ) -> Result<NsType, String> {
-        if let NsType::Generic(_type /* 原类型 */, _) = gen_type {
-            let type_args = type_literal_args
-                .iter()
-                .map(|type_literal| self.analysis_type_literal(type_literal))
-                .collect::<Result<Vec<_>, _>>()?;
-            match *_type {
-                NsType::Unknown(index) => {
-                    Ok(unsafe { type_args.get_unchecked((index) as usize).clone() })
-                }
-                NsType::Tuple(ref tuple_type) => {
-                    let mut result = vec![];
-                    for _t2 in tuple_type.iter() {
-                        if let NsType::Unknown(index) = _t2 {
-                            result.push(unsafe {
-                                type_args.get_unchecked((*index - 1) as usize).clone()
-                            });
-                        } else if let NsType::Generic(_, _) = _t2 {
-                            result.push(self.assign_generic_type(_t2.clone(), type_literal_args)?);
-                        } else {
-                            result.push(_t2.clone())
-                        }
-                    }
-                    Ok(NsType::Tuple(Rc::new(result)))
-                }
-                NsType::Function(_) => todo!(),
-                NsType::Array(_) => todo!(),
-                NsType::Object(_) => todo!(),
-                NsType::Generic(_, _) => {
-                    Ok(self.assign_generic_type(_type.as_ref().clone(), type_literal_args)?)
-                }
-                NsType::Bool => Ok(NsType::Bool),
-                NsType::Number => Ok(NsType::Number),
-                NsType::String => Ok(NsType::String),
-                NsType::Unit => Ok(NsType::Unit),
+        let type_args = type_literal_args
+            .iter()
+            .map(|type_literal| self.analysis_type_literal(type_literal))
+            .collect::<Result<Vec<_>, _>>()?;
+        match gen_type {
+            NsType::Unknown(index) => {
+                Ok(unsafe { type_args.get_unchecked((index) as usize).clone() })
             }
-        } else {
-            Err("不是泛型类型".to_string())
+            NsType::Tuple(ref tuple_type) => {
+                let mut result = vec![];
+                for _t2 in tuple_type.iter() {
+                    if let NsType::Unknown(index) = _t2 {
+                        result.push(unsafe {
+                            type_args.get_unchecked((*index - 1) as usize).clone()
+                        });
+                    } else if Analyzer::is_gen_type(_t2) {
+                        result.push(self.assign_generic_type(_t2.clone(), type_literal_args)?)
+                    } else {
+                        result.push(_t2.clone())
+                    }
+                }
+                Ok(NsType::Tuple(Rc::new(result)))
+            }
+            NsType::Function(_) => todo!(),
+            NsType::Array(_) => todo!(),
+            NsType::Object(_) => todo!(),
+            NsType::Generic(_type, _) => {
+                Ok(self.assign_generic_type(_type.as_ref().clone(), type_literal_args)?)
+            }
+            NsType::Bool => Ok(NsType::Bool),
+            NsType::Number => Ok(NsType::Number),
+            NsType::String => Ok(NsType::String),
+            NsType::Unit => Ok(NsType::Unit),
+        }
+    }
+    pub fn is_gen_type(gen_type: &NsType) -> bool {
+        match gen_type {
+            NsType::Tuple(_types) => _types.iter().any(Analyzer::is_gen_type),
+            NsType::Function(_) => todo!(),
+            NsType::Array(_) => todo!(),
+            NsType::Object(_) => todo!(),
+            NsType::Generic(_, _) => true,
+            NsType::Unknown(_) => true,
+            _ => false,
         }
     }
     /// 将类型字面量转换为NsType
@@ -411,17 +430,19 @@ impl Analyzer {
                 // 对于 B<T> 的右侧 A<T> 来说,这里的解析会生成一个已经合并过的泛型
                 // 即 Tuple(Unknown(1)) 这会导致上文的类型无法正确的定义,因为不被 Generic 包裹的 NsType 不会被推断
                 // 因此在这里包装一次
-                let result = self.assign_generic(name, type_args)?;
-                Ok(NsType::Generic(Rc::new(result), type_args.len() as u8))
+                Ok(self.assign_generic(name, type_args)?)
             }
             // (T,U)
             // 直接递归推断
-            TypeLiteral::Tuple(_types) => Ok(NsType::Tuple(Rc::new(
+            TypeLiteral::Tuple(_types) if !_types.is_empty() => Ok(NsType::Tuple(Rc::new(
                 _types
                     .iter()
                     .map(|_type| self.analysis_type_literal(_type))
                     .collect::<Result<Vec<_>, _>>()?,
             ))),
+            // ()
+            // 虽然是 `()`,但是解析成类型字面量时还是当成了 0 长度的 TypeLiteral::Tuple
+            TypeLiteral::Tuple(_types) if _types.is_empty() => Ok(NsType::Unit),
             // {a:T,b:U}
             TypeLiteral::ObjLiteral(table) => {
                 let mut obj = HashMap::new();
@@ -432,9 +453,18 @@ impl Analyzer {
             }
             // T
             // 单个标识符应该是别名
-            TypeLiteral::Normal(name) => Ok(self.now_scope.borrow().get_ns_type(name)?),
+            TypeLiteral::Normal(name) => {
+                let c = self.now_scope.borrow().get_ns_type(name)?;
+                if let NsType::Generic(..) = c {
+                    Err("类型 ".to_string() + name + " 是泛型")
+                } else {
+                    Ok(c)
+                }
+            }
             // `_`
-            TypeLiteral::Infer => Ok(NsType::Unknown(0)),
+            TypeLiteral::Infer => Ok(NsType::Unknown(1)),
+            // 不加会报错
+            _ => todo!(),
         }
     }
 }
@@ -508,7 +538,7 @@ impl Scope {
         } else if let Some(c) = &self.parent_scope {
             c.borrow().get_ns_type(ns_type_name)
         } else {
-            Err("类型 ".to_string() + ns_type_name + "未定义")
+            Err("类型 ".to_string() + ns_type_name + " 未定义")
         }
     }
     /// 从作用域里删除一个类型

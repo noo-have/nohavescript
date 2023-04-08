@@ -32,16 +32,16 @@ fn main() {
                 "run" => {
                     // let vm = vm::VM::new();
                     parser.set_gen_bytecode(true);
-                    parser.start();
+                    parser.start().unwrap();
                     // vm::run(bytecode)
                 }
                 "translate" => {
                     parser.set_translate(true);
-                    parser.start();
+                    parser.start().unwrap();
                 }
                 "bytecode" => {
                     parser.set_gen_bytecode(true);
-                    parser.start();
+                    parser.start().unwrap();
                     // write_file(bytecode,path)
                 }
                 _ => panic!(),
@@ -56,6 +56,7 @@ use fancy_regex::Regex;
 use crate::{analyzer::NsType, parser::Parser};
 
 fn repl() -> Result<(), String> {
+    let mut analyzer = analyzer::Analyzer::new();
     let mut parser = Parser::new("");
     loop {
         let line = read_line()?;
@@ -63,14 +64,14 @@ fn repl() -> Result<(), String> {
         if line.is_empty() {
             continue;
         }
-        match respond(line, &mut parser) {
+        match respond(line, &mut parser, &mut analyzer) {
             Ok(quit) => {
                 if quit {
                     break;
                 }
             }
             Err(err) => {
-                write!(std::io::stdout(), "{err}").map_err(|e| e.to_string())?;
+                writeln!(std::io::stdout(), "{err}").map_err(|e| e.to_string())?;
                 std::io::stdout().flush().map_err(|e| e.to_string())?;
             }
         }
@@ -78,9 +79,17 @@ fn repl() -> Result<(), String> {
     Ok(())
 }
 
-fn respond(line: &str, parser: &mut Parser) -> Result<bool, String> {
+fn respond(
+    line: &str,
+    parser: &mut Parser,
+    analyzer: &mut analyzer::Analyzer,
+) -> Result<bool, String> {
+    parser.ast.clear();
     parser.set_source_code(line);
-    parser.start();
+    parser.start()?;
+    for stat in &parser.ast {
+        analyzer.analysis_stat(stat)?;
+    }
     Ok(false)
 }
 
@@ -93,11 +102,9 @@ fn read_line() -> Result<String, String> {
         .map_err(|e| e.to_string())?;
     Ok(buffer)
 }
-
 #[cfg(test)]
 mod test_all {
     mod parser_test {
-
         #[test]
         fn parser_元组() {
             let mut p = crate::parser::Parser::new("(42+3,\"1\",2)");
@@ -137,12 +144,46 @@ mod test_all {
     mod analyzer_test {
         use crate::{analyzer::Analyzer, parser::Parser};
 
+        #[should_panic]
         #[test]
-        fn analyzer() -> Result<(), String> {
+        // 未定义类型a
+        fn analyzer_type1() {
             let mut analyzer = Analyzer::new();
-            let mut parser =
-                Parser::new("type s<T> = bool;type d<e,u> = s<u>;let f:d<_,bool> = 32;");
+            let mut parser = Parser::new("type d<T> = a");
             parser.start().unwrap();
+            for stat in parser.ast {
+                analyzer.analysis_stat(&stat).unwrap();
+            }
+        }
+        #[should_panic]
+        #[test]
+        // 参数数量太多
+        fn analyzer_type2() {
+            let mut analyzer = Analyzer::new();
+            let mut parser = Parser::new("type a<T> = (T,number) let p:a<number,number> =2");
+            parser.start().unwrap();
+            for stat in parser.ast {
+                analyzer.analysis_stat(&stat).unwrap();
+            }
+        }
+        #[should_panic]
+        #[test]
+        // 不给参数的泛型
+        fn analyzer_type3() {
+            let mut analyzer = Analyzer::new();
+            let mut parser = Parser::new("type a<T> = () let p:a =2");
+            parser.start().unwrap();
+            for stat in parser.ast {
+                analyzer.analysis_stat(&stat).unwrap();
+            }
+        }
+        #[test]
+        fn analyzer_type4() -> Result<(), String> {
+            let mut analyzer = Analyzer::new();
+            let mut parser = Parser::new(
+                "type a<T> = (T,number) type d<T,U> = (a<T>,a<U>);let f:d<bool,()> = 32;",
+            );
+            parser.start()?;
             for stat in parser.ast {
                 analyzer.analysis_stat(&stat)?;
             }
