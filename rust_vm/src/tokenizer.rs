@@ -64,7 +64,7 @@ impl Tokenizer {
                 (reg!(r"^\r?\n|(?<!\n)\r"), TokenType::换行符),
                 (reg!(r"^[\x20]+"), TokenType::空格),
                 (
-                    reg!(r"^(return|let|const|match|if|else|fn|while|for|in|\_)"),
+                    reg!(r"^(return|let|const|match|if|else|fn|while|for|in|\_|type)"),
                     TokenType::关键字,
                 ),
                 (reg!(r"^(\-)?\d+(\.\d+)?"), TokenType::数字字面量),

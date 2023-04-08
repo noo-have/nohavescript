@@ -1,16 +1,21 @@
 //! 解析器模块
 use std::collections::HashMap;
 
-use crate::{
-    analyzer::NsType,
-    tokenizer::{Token, TokenType, Tokenizer},
-};
+use crate::tokenizer::{Token, TokenType, Tokenizer};
 /// 语句
 #[cfg_attr(debug_assertions, derive(Debug))]
 pub enum Stat {
-    表达式语句 {
-        expression: Expr,
-    },
+    /// ```
+    ///
+    /// 1+1
+    ///
+    /// ```
+    表达式语句 { expression: Expr },
+    /// ```
+    ///
+    /// let {a:c}:T = 3
+    ///
+    /// ```
     变量声明语句 {
         /// 是不是常量声明?
         is_const: bool,
@@ -23,30 +28,66 @@ pub enum Stat {
         /// 右侧的初始化表达式
         right: Expr,
     },
+    /// ```
+    ///
+    /// async fn (d:T,{s:p}:U) -> T {...}
+    ///
+    /// ```
     函数声明语句 {
         /// 是不是异步函数?
         is_async: bool,
         /// 函数名称
         name: String,
-        /// 参数列表,元素是(模式,可选的类型标注)元组的不定长数组
+        /// 参数列表,由(模式,可选的类型标注)元组构成的不定长数组
         args: Vec<(Pattern, Option<TypeLiteral>)>,
         /// 返回值的可选的类型标注
         ret_type_annotation: Option<TypeLiteral>,
         /// 语句块
         block_expr: Expr,
     },
-    返回值语句 {
-        expression: Expr,
-    },
+    /// ```
+    ///
+    /// return 3
+    ///
+    /// ```
+    返回值语句 { expression: Expr },
+    /// ```
+    ///
+    /// type P<T> = (T,T)
+    ///
+    /// ```
+    类型声明语句(TypeLiteral, TypeLiteral),
 }
 /// "模式"
 #[cfg_attr(debug_assertions, derive(Debug))]
 pub enum Pattern {
+    /// `e`
     Id(String),
+    /// `_`
     Ignore,
+    /// ```
+    ///
+    /// (e,l:r)
+    ///
+    /// ```
     TupleMatch(Vec<Pattern>),
+    /// ```
+    ///
+    /// [x:xs]
+    ///
+    /// ```
     ArrayMatch(Vec<Pattern>),
+    /// ```
+    ///
+    /// {a,b:c}
+    ///
+    /// ```
     ObjectMatch(HashMap<String, Pattern>),
+    /// ```
+    ///
+    /// E::a | E::b(_)
+    ///
+    /// ```
     EnumMember {
         enum_name: String,
         enum_member: String,
@@ -55,25 +96,43 @@ pub enum Pattern {
 }
 #[cfg_attr(debug_assertions, derive(Debug))]
 pub enum Expr {
+    /// ```
+    ///
+    /// 23 | true
+    ///
+    /// ```
     字面量 {
         value: String,
         line: i32,
         column: i32,
     },
+    /// ```
+    ///
+    /// (2,) | (3,2,3)
+    ///
+    /// ```
     元组 {
         elements: Vec<Expr>,
         line: i32,
         column: i32,
     },
-    单元 {
-        line: i32,
-        column: i32,
-    },
+    /// ```
+    ///
+    /// ()
+    ///
+    /// ```
+    单元 { line: i32, column: i32 },
+    /// ```
+    ///
+    /// a
+    ///
+    /// ````
     标识符 {
         value: String,
         line: i32,
         column: i32,
     },
+    /// `1+1`
     二元表达式 {
         operator: String,
         left: Box<Expr>,
@@ -81,6 +140,7 @@ pub enum Expr {
         line: i32,
         column: i32,
     },
+    /// `d` = `3`
     赋值表达式 {
         operator: String,
         left: Box<Expr>,
@@ -88,35 +148,45 @@ pub enum Expr {
         line: i32,
         column: i32,
     },
+    /// `{1+1}`
     块表达式 {
         body: Vec<Stat>,
         line: i32,
         column: i32,
     },
-    对象表达式 {
-        property: Vec<(String, Expr)>,
-    },
+    /// `{a}` | `{a,l:1}`
+    对象表达式 { property: Vec<(String, Expr)> },
 }
 
 /// 类型字面量
 ///
 /// `S<T>` <=> `TypeLiteral{name:"s",type_arg:Some(vec![{name:"T",type_arg:None}])}`
 #[cfg_attr(debug_assertions, derive(Debug))]
-#[derive(Clone)]
+// #[derive(Clone)]
 pub enum TypeLiteral {
     /// 带参数的类型字面量
+    ///
+    /// `T<U>`
     Generic {
         /// 类型名称
         name: String,
         /// 类型参数
-        type_arg: Vec<TypeLiteral>,
+        type_args: Vec<TypeLiteral>,
     },
     /// 无参数的类型字面量
+    ///
+    /// `T`
     Normal(String),
     /// 元组类型字面量
+    ///
+    /// `(T,U)`
     Tuple(Vec<TypeLiteral>),
     /// 字面量 `_`
     Infer,
+    ///
+    ///
+    ///
+    ObjLiteral(HashMap<String, TypeLiteral>),
 }
 /// 解析器
 pub struct Parser {
@@ -138,9 +208,9 @@ pub struct Parser {
 impl Parser {
     /// 启动解析
     pub fn start(&mut self) -> Result<(), String> {
-        while let Some(token) = self.get_next_token() {
+        if let Some(token) = self.get_next_token() {
             if let TokenType::结束 = token.token_type {
-                continue;
+                return Ok(());
             }
             self.now_token = token;
             self.line = self.now_token.line;
@@ -185,8 +255,15 @@ impl Parser {
     }
     /// 解析入口
     fn parse(&mut self) -> Result<(), String> {
-        let stat = self.parse_stat()?;
-        self.ast.push(stat);
+        loop {
+            let stat = self.parse_stat()?;
+            self.ast.push(stat);
+            // 匹配掉 `;`
+            self.match_token_value(&[";"]);
+            if self.match_token_type(TokenType::结束) {
+                break;
+            }
+        }
         Ok(())
     }
     /// 拿取下一个token,并且将parser的各项数据与新token对齐
@@ -271,9 +348,7 @@ impl Parser {
             let mut type_annotation = None;
             if self.match_token_value(&[":"]) {
                 type_annotation = Some(self.parse_type_literal()?);
-                println!("{:?}", type_annotation)
             }
-            println!("{:?}", self.now_token);
             self.consume_token_value(&["="], "缺失等于号");
             Ok(Stat::变量声明语句 {
                 is_const: false,
@@ -286,7 +361,12 @@ impl Parser {
         } else if self.match_token_value(&["for"]) {
             todo!()
         } else if self.match_token_value(&["type"]) {
-            todo!()
+            let type_name = self.parse_type_literal()?;
+            self.consume_token_value(&["="], "缺失等于号");
+            Ok(Stat::类型声明语句(
+                type_name,
+                self.parse_type_literal()?,
+            ))
         } else if self.match_token_value(&["enum"]) {
             todo!()
         } else if self.match_token_value(&["fn"]) {
@@ -348,12 +428,31 @@ impl Parser {
                     self.consume_token_value(&[","], "");
                     type_arg.push(self.parse_type_literal()?);
                 }
-                Ok(TypeLiteral::Generic { name, type_arg })
+                Ok(TypeLiteral::Generic {
+                    name,
+                    type_args: type_arg,
+                })
             } else {
                 Ok(TypeLiteral::Normal(name))
             }
         } else if self.match_token_value(&["_"]) {
             Ok(TypeLiteral::Infer)
+        } else if self.match_token_value(&["{"]) {
+            if self.match_token_value(&["}"]) {
+                Err("使用 `()` 来代替".to_string())
+            } else {
+                let mut field_table = HashMap::new();
+                while !self.match_token_value(&["}"]) {
+                    self.consume_token_type(TokenType::标识符, "需要标识符");
+
+                    let field_name = self.get_previous_token().value.clone();
+                    self.consume_token_value(&[":"], "需要 `:`");
+
+                    field_table.insert(field_name, self.parse_type_literal()?);
+                    self.match_token_value(&[";", ","]);
+                }
+                Ok(TypeLiteral::ObjLiteral(field_table))
+            }
         } else {
             Err("不合法的类型标注".to_string())
         }
@@ -426,7 +525,6 @@ impl Parser {
         } else if self.match_token_value(&["_"]) {
             Ok(Pattern::Ignore)
         } else {
-            crate::debug!("{:?}", self.now_token);
             todo!()
         }
     }
@@ -582,7 +680,6 @@ impl Parser {
             } = self.tokenizer;
             if self.check_token_type(TokenType::标识符) {
                 self.match_token_type(TokenType::标识符);
-
                 if self.match_token_value(&[":"]) {
                     todo!()
                 } else if self.match_token_value(&[","]) {
