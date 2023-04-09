@@ -19,7 +19,7 @@ pub enum NsType {
     /// 数组
     Array(Rc<NsType>),
     /// 对象
-    Object(Rc<HashMap<String, NsType>>),
+    Object(Rc<HashMap<Rc<String>, NsType>>),
     /// 泛型和它的泛型参数数量,只是一个简单包装,方便模式匹配
     Generic(Rc<NsType>, u8),
     /// 真正的未知类型,比如泛型定义时的参数,以及 `_`
@@ -206,7 +206,8 @@ impl Analyzer {
                     } else {
                         NsType::Unknown(1)
                     };
-                    println!("result:::{result:?}");
+                    // crate::debug!("result:::{result:?}");
+                    // crate::debug!("{:#?}", self.now_scope);
                     Ok(())
                 }
             }
@@ -241,15 +242,15 @@ impl Analyzer {
                         {
                             return Err("泛型参数必须是标识符".to_string());
                         } else {
-                            // 先为A类型占位
-                            // 也许之后递归也会更方便?
-                            self.now_scope.borrow_mut().def_ns_type(
-                                name,
-                                NsType::Generic(
-                                    Rc::new(NsType::Unknown(type_args.len() as u8)),
-                                    type_args.len() as u8,
-                                ),
-                            )?;
+                            // // 先为A类型占位
+                            // // 也许之后递归也会更方便?
+                            // self.now_scope.borrow_mut().def_ns_type(
+                            //     name,
+                            //     NsType::Generic(
+                            //         Rc::new(NsType::Unknown(type_args.len() as u8)),
+                            //         type_args.len() as u8,
+                            //     ),
+                            // )?;
                             // 泛型参数的占位
                             // 对于 type A<T,U> = (T,U) 来说,将会生成
                             // T -> (Unknown(1))
@@ -351,7 +352,24 @@ impl Analyzer {
                     }
                     NsType::Function(_) => todo!(),
                     NsType::Array(_) => todo!(),
-                    NsType::Object(_) => todo!(),
+                    NsType::Object(ref objtype) => {
+                        let mut table = HashMap::new();
+                        for (name, _type) in objtype.iter() {
+                            if let NsType::Unknown(index) = _type {
+                                table.insert(name.clone(), unsafe {
+                                    type_args.get_unchecked((*index - 1) as usize).clone()
+                                });
+                            } else if Analyzer::is_gen_type(_type) {
+                                table.insert(
+                                    name.clone(),
+                                    self.assign_generic_type(_type.clone(), type_literal_args)?,
+                                );
+                            } else {
+                                table.insert(name.clone(), _type.clone());
+                            }
+                        }
+                        Ok(NsType::Object(Rc::new(table)))
+                    }
                     // 对应 type A<T> = ...;type B<T> = A<T> 这种情况
                     NsType::Generic(ref ns_type, _) => {
                         Ok(self.assign_generic_type(ns_type.as_ref().clone(), type_literal_args)?)
@@ -400,7 +418,24 @@ impl Analyzer {
             }
             NsType::Function(_) => todo!(),
             NsType::Array(_) => todo!(),
-            NsType::Object(_) => todo!(),
+            NsType::Object(objtype) => {
+                let mut table = HashMap::new();
+                for (name, _type) in objtype.iter() {
+                    if let NsType::Unknown(index) = _type {
+                        table.insert(name.clone(), unsafe {
+                            type_args.get_unchecked((*index - 1) as usize).clone()
+                        });
+                    } else if Analyzer::is_gen_type(_type) {
+                        table.insert(
+                            name.clone(),
+                            self.assign_generic_type(_type.clone(), type_literal_args)?,
+                        );
+                    } else {
+                        table.insert(name.clone(), _type.clone());
+                    }
+                }
+                Ok(NsType::Object(Rc::new(table)))
+            }
             NsType::Generic(_type, _) => {
                 Ok(self.assign_generic_type(_type.as_ref().clone(), type_literal_args)?)
             }
@@ -425,13 +460,7 @@ impl Analyzer {
     fn analysis_type_literal(&self, type_literal: &TypeLiteral) -> Result<NsType, String> {
         match type_literal {
             // T<U>
-            TypeLiteral::Generic { name, type_args } => {
-                // 一个问题是 type A<T> = ... type B<T> = A<T>
-                // 对于 B<T> 的右侧 A<T> 来说,这里的解析会生成一个已经合并过的泛型
-                // 即 Tuple(Unknown(1)) 这会导致上文的类型无法正确的定义,因为不被 Generic 包裹的 NsType 不会被推断
-                // 因此在这里包装一次
-                Ok(self.assign_generic(name, type_args)?)
-            }
+            TypeLiteral::Generic { name, type_args } => Ok(self.assign_generic(name, type_args)?),
             // (T,U)
             // 直接递归推断
             TypeLiteral::Tuple(_types) if !_types.is_empty() => Ok(NsType::Tuple(Rc::new(
@@ -447,7 +476,7 @@ impl Analyzer {
             TypeLiteral::ObjLiteral(table) => {
                 let mut obj = HashMap::new();
                 for (f, v) in table.iter() {
-                    obj.insert(f.to_string(), self.analysis_type_literal(v)?);
+                    obj.insert(Rc::new(f.to_string()), self.analysis_type_literal(v)?);
                 }
                 Ok(NsType::Object(Rc::new(obj)))
             }
