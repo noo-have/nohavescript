@@ -1,6 +1,6 @@
 //! 分词器模块
-use fancy_regex::Regex;
-
+use regex::Regex;
+#[macro_export]
 /// 对Regex::new的简化
 macro_rules! reg {
     ($a:expr) => {
@@ -23,7 +23,7 @@ impl Iterator for Tokenizer {
         }
         let mut token = None;
         for (reg, token_type) in &self.match_regexp {
-            if let Ok(Some(result)) = reg.captures(str) {
+            if let Some(result) = reg.captures(str) {
                 let xx = result.get(0).unwrap().as_str();
                 token = Some(Token {
                     column: self.column,
@@ -59,23 +59,24 @@ impl Tokenizer {
             point: 0,
             source_code: code.to_string(),
             match_regexp: vec![
-                (reg!(r"^\/\/.*"), TokenType::单行注释),
-                (reg!(r"^\/\*([^*]|\*+[^*/])*\*+\/"), TokenType::块注释),
-                (reg!(r"^\r?\n|(?<!\n)\r"), TokenType::换行符),
+                (reg!(r"^//.*"), TokenType::单行注释),
+                (reg!(r"^/\*([^*]|\*+[^*/])*\*+/"), TokenType::块注释),
+                (reg!(r"^\r?\n|\r"), TokenType::换行符),
                 (reg!(r"^[\x20]+"), TokenType::空格),
                 (
-                    reg!(r"^(return|let|const|match|if|else|fn|while|for|in|\_|type)"),
+                    reg!(r"^(return|let|const|match|if|else|fn|while|for|in|_|type)"),
                     TokenType::关键字,
                 ),
                 (reg!(r"^(\-)?\d+(\.\d+)?"), TokenType::数字字面量),
                 (
-                    reg!(
-                        r"^(\:\:|>=|<=|\+|->|-|\>|\<|\*\*|\*|\/|=>|==|=|&&|\!|\|\||\,|\;|\:|\{|\})"
-                    ),
+                    reg!(r"^(::|>=|<=|\+|->|-|>|<|\*\*|\*|/|=>|==|=|&&|!|\|\||,|;|:|\{|\})"),
                     TokenType::运算符,
                 ),
-                (reg!(r"^(true|false)(?=\b)"), TokenType::布尔值),
-                (reg!(r"^[a-zA-Z_][a-zA-Z0-9_]*"), TokenType::标识符),
+                (reg!(r"^(true|false) +"), TokenType::布尔值),
+                (
+                    reg!(r"^[\u4e00-\u9fa5a-zA-Z_][\u4e00-\u9fa5a-zA-Z0-9_]*"),
+                    TokenType::标识符,
+                ),
                 (reg!(r"^\("), TokenType::左括号),
                 (reg!(r"^\)"), TokenType::右括号),
                 (reg!("^\"[^\"]*\""), TokenType::字符串),
