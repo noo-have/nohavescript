@@ -5,10 +5,8 @@ mod macros;
 mod parser;
 mod tokenizer;
 mod translate;
-// mod type_check;
 mod vm;
 fn main() {
-    debug!("{}", std::mem::size_of::<NsType>());
     let mut c = std::env::args();
     if c.len() == 1 {
         repl().unwrap();
@@ -19,13 +17,7 @@ fn main() {
         let reg = Regex::new("-(.*)").unwrap();
         // 第一个参数为""或当前路径
         for arg in c {
-            let arg = reg
-                .captures(&arg)
-                .unwrap()
-                .unwrap()
-                .get(1)
-                .unwrap()
-                .as_str();
+            let arg = reg.captures(&arg).unwrap().get(1).unwrap().as_str();
             debug!("{:?}", arg);
             match arg {
                 "help" => {}
@@ -51,9 +43,9 @@ fn main() {
 }
 use std::io::Write;
 
-use fancy_regex::Regex;
+use regex::Regex;
 
-use crate::{analyzer::NsType, parser::Parser};
+use crate::parser::Parser;
 
 fn repl() -> Result<(), String> {
     let mut analyzer = analyzer::Analyzer::new();
@@ -86,10 +78,12 @@ fn respond(
 ) -> Result<bool, String> {
     parser.ast.clear();
     parser.set_source_code(line);
+    let now = std::time::Instant::now();
     parser.start()?;
     for stat in &parser.ast {
         analyzer.analysis_stat(stat)?;
     }
+    println!("解析用时{:?}", std::time::Instant::now() - now);
     Ok(false)
 }
 
@@ -181,7 +175,7 @@ mod test_all {
         fn analyzer_type4() -> Result<(), String> {
             let mut analyzer = Analyzer::new();
             let mut parser = Parser::new(
-                "type a<T> = (T,number) type d<T,U> = (a<T>,a<U>);let f:d<bool,()> = 32;",
+                "type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;",
             );
             parser.start()?;
             for stat in parser.ast {
@@ -214,7 +208,7 @@ mod test_all {
                 // ByteCode::Ne,
                 // ByteCode::If(6, 11),
                 // ByteCode::Def("s"),
-                ByteCode::Go(2),
+                // ByteCode::Go(2),
             ];
             let p = time::Instant::now();
             vm.run(&bytecode_list);
