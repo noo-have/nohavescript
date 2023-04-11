@@ -10,9 +10,9 @@ macro_rules! reg {
 pub struct Tokenizer {
     pub source_code: String,
     pub match_regexp: Vec<(Regex, TokenType)>,
-    pub line: i32,
-    pub point: i32,
-    pub column: i32,
+    pub line: u32,
+    pub point: u32,
+    pub column: u32,
 }
 impl Iterator for Tokenizer {
     type Item = Token;
@@ -24,11 +24,11 @@ impl Iterator for Tokenizer {
         let mut token = None;
         for (reg, token_type) in &self.match_regexp {
             if let Some(result) = reg.captures(str) {
-                let xx = result.get(0).unwrap().as_str();
+                let xx = Box::leak(result.get(0).unwrap().as_str().to_string().into_boxed_str());
                 token = Some(Token {
                     column: self.column,
                     line: self.line,
-                    value: xx.to_string(),
+                    value: xx,
                     token_type: token_type.clone(),
                 });
                 self.eat_token(&token);
@@ -47,10 +47,10 @@ impl Tokenizer {
                 self.column = 1;
             }
             _ => {
-                self.column += c.value.len() as i32;
+                self.column += c.value.len() as u32;
             }
         };
-        self.point += c.value.len() as i32;
+        self.point += c.value.len() as u32;
     }
     pub fn new(code: &str) -> Self {
         Tokenizer {
@@ -60,19 +60,19 @@ impl Tokenizer {
             source_code: code.to_string(),
             match_regexp: vec![
                 (reg!(r"^//.*"), TokenType::单行注释),
-                (reg!(r"^/\*([^*]|\*+[^*/])*\*+/"), TokenType::块注释),
+                (reg!(r"^/\*(?:[^*]|\*+[^*/])*\*+/"), TokenType::块注释),
                 (reg!(r"^\r?\n|\r"), TokenType::换行符),
                 (reg!(r"^[\x20]+"), TokenType::空格),
                 (
-                    reg!(r"^(return|let|const|match|if|else|fn|while|for|in|_|type)"),
+                    reg!(r"^(?:return|let|const|match|if|else|fn|Fn|while|for|in|_|type)"),
                     TokenType::关键字,
                 ),
                 (reg!(r"^(\-)?\d+(\.\d+)?"), TokenType::数字字面量),
                 (
-                    reg!(r"^(::|>=|<=|\+|->|-|>|<|\*\*|\*|/|=>|==|=|&&|!|\|\||,|;|:|\{|\})"),
+                    reg!(r"^(?:::|>=|<=|\+|->|-|>|<|\*\*|\*|/|=>|==|=|&&|!|\|\||,|;|:|\{|\})"),
                     TokenType::运算符,
                 ),
-                (reg!(r"^(true|false) +"), TokenType::布尔值),
+                (reg!(r"^(true|false)(?:\b)"), TokenType::布尔值),
                 (
                     reg!(r"^[\u4e00-\u9fa5a-zA-Z_][\u4e00-\u9fa5a-zA-Z0-9_]*"),
                     TokenType::标识符,
@@ -103,13 +103,24 @@ pub enum TokenType {
     左括号,
     右括号,
 }
-#[derive(Clone)]
+
 #[cfg_attr(debug_assertions, derive(Debug))]
 pub struct Token {
     pub token_type: TokenType,
-    pub value: String,
+    pub value: &'static str,
     /// 行
-    pub line: i32,
+    pub line: u32,
     /// 列
-    pub column: i32,
+    pub column: u32,
+}
+impl Clone for Token {
+    /// 廉价的复制
+    fn clone(&self) -> Self {
+        Token {
+            token_type: self.token_type.clone(),
+            value: self.value,
+            line: self.line,
+            column: self.column,
+        }
+    }
 }
