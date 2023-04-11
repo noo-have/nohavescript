@@ -23,17 +23,17 @@ fn main() {
                 "help" => {}
                 "run" => {
                     // let vm = vm::VM::new();
-                    parser.set_gen_bytecode(true);
-                    parser.start().unwrap();
+                    // parser.set_gen_bytecode(true);
+                    parser.start();
                     // vm::run(bytecode)
                 }
                 "translate" => {
-                    parser.set_translate(true);
-                    parser.start().unwrap();
+                    // parser.set_translate(true);
+                    parser.start();
                 }
                 "bytecode" => {
-                    parser.set_gen_bytecode(true);
-                    parser.start().unwrap();
+
+                    // parser.start().unwrap();
                     // write_file(bytecode,path)
                 }
                 _ => panic!(),
@@ -70,19 +70,22 @@ fn repl() -> Result<(), String> {
     }
     Ok(())
 }
-
 fn respond(
     line: &str,
     parser: &mut Parser,
     analyzer: &mut analyzer::Analyzer,
-) -> Result<bool, String> {
+) -> Result<bool, error::ParseError> {
     parser.ast.clear();
     parser.set_source_code(line);
     let now = std::time::Instant::now();
-    parser.start()?;
-    for stat in &parser.ast {
-        analyzer.analysis_stat(stat)?;
-    }
+    parser.start();
+    parser.ast.iter().for_each(|stat| {
+        if let Ok(stat) = stat {
+            analyzer.analysis_stat(stat).unwrap();
+        } else {
+            println!("错误 {:?}", stat);
+        }
+    });
     println!("解析用时{:?}", std::time::Instant::now() - now);
     Ok(false)
 }
@@ -102,41 +105,47 @@ mod test_all {
         #[test]
         fn parser_元组() {
             let mut p = crate::parser::Parser::new("(42+3,\"1\",2)");
-            p.start().unwrap();
+            p.start();
         }
         #[test]
         fn parse_二元表达式() {
             let mut p = crate::parser::Parser::new("1+2");
-            p.start().unwrap();
+            p.start();
         }
         #[test]
         fn parse_块语句() {
             let mut p = crate::parser::Parser::new("{}{1+2;23}");
-            p.start().unwrap();
+            p.start();
         }
         #[test]
         fn parse_单元() {
             let mut p = crate::parser::Parser::new("(((2,)))+()  ");
-            p.start().unwrap();
+            p.start();
         }
         #[test]
         fn parse_let_stat() {
             let mut p = crate::parser::Parser::new("let as::w = 2");
-            p.start().unwrap();
+            p.start();
         }
         #[test]
         fn parse_type_literal() {
-            let mut p = crate::parser::Parser::new("let l:P<w,(l,p)> = 2");
-            p.start().unwrap();
+            let mut p = crate::parser::Parser::new("let l:P<w,(l,p),Fn s -> d -> ()> = 2");
+            p.start();
         }
         #[test]
         fn parse_type_def() {
             let mut p = crate::parser::Parser::new("type k = {d:i32}");
-            p.start().unwrap();
+            p.start();
+        }
+        #[test]
+        fn parse_panic_mode() {
+            let mut p = crate::parser::Parser::new("type k = {d:3} let c = 1");
+            p.start();
+            println!("{:?},", p.ast);
         }
     }
     mod analyzer_test {
-        use crate::{analyzer::Analyzer, parser::Parser};
+        use crate::{analyzer::Analyzer, error, parser::Parser};
 
         #[should_panic]
         #[test]
@@ -144,21 +153,25 @@ mod test_all {
         fn analyzer_type1() {
             let mut analyzer = Analyzer::new();
             let mut parser = Parser::new("type d<T> = a");
-            parser.start().unwrap();
-            for stat in parser.ast {
-                analyzer.analysis_stat(&stat).unwrap();
-            }
+            parser.start();
+            parser.ast.iter().for_each(|stat| {
+                if let Ok(stat) = stat {
+                    analyzer.analysis_stat(stat).unwrap();
+                }
+            })
         }
         #[should_panic]
         #[test]
         // 参数数量太多
         fn analyzer_type2() {
             let mut analyzer = Analyzer::new();
-            let mut parser = Parser::new("type a<T> = (T,number) let p:a<number,number> =2");
-            parser.start().unwrap();
-            for stat in parser.ast {
-                analyzer.analysis_stat(&stat).unwrap();
-            }
+            let mut parser = Parser::new("type a<T> = (T,num) let p:a<num,num> =2");
+            parser.start();
+            parser.ast.iter().for_each(|stat| {
+                if let Ok(stat) = stat {
+                    analyzer.analysis_stat(stat).unwrap();
+                }
+            })
         }
         #[should_panic]
         #[test]
@@ -166,21 +179,23 @@ mod test_all {
         fn analyzer_type3() {
             let mut analyzer = Analyzer::new();
             let mut parser = Parser::new("type a<T> = () let p:a =2");
-            parser.start().unwrap();
-            for stat in parser.ast {
-                analyzer.analysis_stat(&stat).unwrap();
-            }
+            parser.start();
+            parser.ast.iter().for_each(|stat| {
+                if let Ok(stat) = stat {
+                    analyzer.analysis_stat(stat).unwrap();
+                }
+            })
         }
         #[test]
-        fn analyzer_type4() -> Result<(), String> {
+        fn analyzer_type4() -> Result<(), error::ParseError> {
             let mut analyzer = Analyzer::new();
-            let mut parser = Parser::new(
-                "type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;type a<T> = (T,number) type d<T,U> = {a:a<U>,b:()};let f:d<_,_> = 32;",
-            );
-            parser.start()?;
-            for stat in parser.ast {
-                analyzer.analysis_stat(&stat)?;
-            }
+            let mut parser = Parser::new("type a<T> = () let x:a<_> = true ; ");
+            parser.start();
+            parser.ast.iter().for_each(|stat| {
+                if let Ok(stat) = stat {
+                    analyzer.analysis_stat(stat).unwrap();
+                }
+            });
             Ok(())
         }
     }
