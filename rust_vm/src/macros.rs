@@ -8,3 +8,21 @@ macro_rules! debug {
         println!($($a,)*);
     };
 }
+/// add!(expr) 等效于 ++expr
+#[macro_export]
+macro_rules! add {
+    ($a:expr) => {{
+        $a += 1;
+        $a
+    }};
+}
+/// do_while(block_expr,expr) 等效于
+///
+/// do block_expr while expr block_expr
+#[macro_export]
+macro_rules! do_while {
+    ($b:block,$a:expr) => {
+        $b;
+        while $a $b;
+    };
+}
