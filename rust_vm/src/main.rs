@@ -81,9 +81,7 @@ fn respond(
     parser.start();
     parser.ast.iter().for_each(|stat| {
         if let Ok(stat) = stat {
-            analyzer.analysis_stat(stat).unwrap();
-        } else {
-            println!("错误 {:?}", stat);
+            analyzer.analysis_stat(stat);
         }
     });
     println!("解析用时{:?}", std::time::Instant::now() - now);
@@ -129,7 +127,7 @@ mod test_all {
         }
         #[test]
         fn parse_type_literal() {
-            let mut p = crate::parser::Parser::new("let l:P<w,(l,p),Fn s -> d -> ()> = 2");
+            let mut p = crate::parser::Parser::new("let l:P<w,(l,p),s -> d -> ()> = 2");
             p.start();
         }
         #[test]
@@ -139,9 +137,28 @@ mod test_all {
         }
         #[test]
         fn parse_panic_mode() {
-            let mut p = crate::parser::Parser::new("type k = {d:3} let c = 1");
+            let mut p = crate::parser::Parser::new("type c= let d ;let c = type d = () let p = 0");
             p.start();
-            println!("{:?},", p.ast);
+            println!("{:#?}", p.ast);
+        }
+        #[test]
+        fn parse_fn_expr() {
+            let mut p = crate::parser::Parser::new(
+                "\\d => 1 \\() => 2 \\(d) => 3 \\(d,f) => 4 \\(d:P) => 0",
+            );
+            p.start();
+        }
+        #[test]
+        fn parse_call_expr() {
+            let mut p = crate::parser::Parser::new(r"dss(1,4,(1,2),\e => {let x = 23;})");
+            p.start();
+            crate::debug!("{:#?}", p.ast);
+        }
+        #[test]
+        fn parse_obj_expr() {
+            let mut p = crate::parser::Parser::new(r"{a:23,d} {let p = 2;}");
+            p.start();
+            crate::debug!("{:#?}", p.ast);
         }
     }
     mod analyzer_test {
@@ -189,8 +206,11 @@ mod test_all {
         #[test]
         fn analyzer_type4() -> Result<(), error::ParseError> {
             let mut analyzer = Analyzer::new();
-            let mut parser = Parser::new("type a<T> = () let x:a<_> = true ; ");
+            let mut parser = Parser::new(
+                "type a<A,B,C,D,E,F> = A -> C -> (B) -> (D,E,(),F);let a :a<(),(),num,bool,(),()> = 123",
+            );
             parser.start();
+            println!("{:?}", parser.ast);
             parser.ast.iter().for_each(|stat| {
                 if let Ok(stat) = stat {
                     analyzer.analysis_stat(stat).unwrap();
