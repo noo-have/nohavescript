@@ -64,17 +64,17 @@ impl Tokenizer {
                 (reg!(r"^\r?\n|\r"), TokenType::换行符),
                 (reg!(r"^[\x20]+"), TokenType::空格),
                 (
-                    reg!(r"^(?:return|let|const|match|if|else|fn|Fn|while|for|in|_|type)"),
+                    reg!(r"^(?:return|let|const|match|if|else|fn|Fn|while|for|in|_|type)(?:\b)"),
                     TokenType::关键字,
                 ),
                 (reg!(r"^(\-)?\d+(\.\d+)?"), TokenType::数字字面量),
                 (
-                    reg!(r"^(?:::|>=|<=|\+|->|-|>|<|\*\*|\*|/|=>|==|=|&&|!|\|\||,|;|:|\{|\})"),
-                    TokenType::运算符,
+                    reg!(r"^(?:@|::|>=|<=|\+|->|-|>|<|\*\*|\*|/|=>|==|=|&&|!|\|\||,|;|:|\{|\}|\\)"),
+                    TokenType::符号,
                 ),
                 (reg!(r"^(true|false)(?:\b)"), TokenType::布尔值),
                 (
-                    reg!(r"^[\u4e00-\u9fa5a-zA-Z_][\u4e00-\u9fa5a-zA-Z0-9_]*"),
+                    reg!(r"^[\u4e00-\u9fa5a-zA-Z_][\u4e00-\u9fa5a-zA-Z0-9_]*(?:\b)"),
                     TokenType::标识符,
                 ),
                 (reg!(r"^\("), TokenType::左括号),
@@ -88,7 +88,6 @@ impl Tokenizer {
 #[cfg_attr(debug_assertions, derive(Debug))]
 pub enum TokenType {
     字符串,
-    符号,
     单行注释,
     块注释,
     文档注释,
@@ -98,7 +97,7 @@ pub enum TokenType {
     换行符,
     空格,
     结束,
-    运算符,
+    符号,
     布尔值,
     左括号,
     右括号,
