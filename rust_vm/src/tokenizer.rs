@@ -74,6 +74,10 @@ impl Tokenizer {
                 ),
                 (reg!(r"^(true|false)(?:\b)"), TokenType::布尔值),
                 (
+                    reg!(r"^'[a-zA-Z][a-zA-Z]?(?:\b)"),
+                    TokenType::泛型专用标识符,
+                ),
+                (
                     reg!(r"^[\u4e00-\u9fa5a-zA-Z_][\u4e00-\u9fa5a-zA-Z0-9_]*(?:\b)"),
                     TokenType::标识符,
                 ),
@@ -87,6 +91,7 @@ impl Tokenizer {
 #[derive(Clone, PartialEq)]
 #[cfg_attr(debug_assertions, derive(Debug))]
 pub enum TokenType {
+    泛型专用标识符,
     字符串,
     单行注释,
     块注释,
