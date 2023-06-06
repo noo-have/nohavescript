@@ -2,9 +2,11 @@
 use std::collections::HashMap;
 
 use crate::{
-    error,
+    error::{syntax_error, ParseError},
     tokenizer::{Token, TokenType, Tokenizer},
 };
+/// 位置,
+type Loc = (u32, u32);
 /// 语句
 #[derive(Debug)]
 pub enum Stat {
@@ -13,7 +15,7 @@ pub enum Stat {
     /// 1+1
     ///
     /// ```
-    表达式语句 { expression: Expr },
+    表达式语句 { expression: BoxExpr },
     /// ```
     ///
     /// let {a:c}:T = 3
@@ -29,7 +31,7 @@ pub enum Stat {
         /// 但如果`is_const`为`true`,那么类型标注是必须的
         type_annotation: Option<TypeLiteral>,
         /// 右侧的初始化表达式
-        right: Expr,
+        right: BoxExpr,
     },
     /// ```
     ///
@@ -46,20 +48,39 @@ pub enum Stat {
         /// 返回值的可选的类型标注
         ret_type_annotation: Option<TypeLiteral>,
         /// 语句块
-        block_expr: Expr,
+        block_expr: BoxExpr,
     },
     /// ```
     ///
     /// return 3
     ///
     /// ```
-    返回值语句 { expression: Expr },
+    返回值语句 { expression: BoxExpr },
     /// ```
     ///
     /// type P<T> = (T,T)
     ///
     /// ```
     类型声明语句(TypeLiteral, TypeLiteral),
+    /// ```
+    ///
+    /// for a in b {}
+    ///
+    /// ```
+    for循环 {
+        /// 被循环的表达式
+        forin: BoxExpr,
+        ///
+        pattern: Pattern,
+        /// 要执行的语句
+        block: BoxExpr,
+    },
+    /// ```
+    ///
+    /// while a {}
+    ///
+    /// ```
+    while循环 { whilein: BoxExpr, block: BoxExpr },
     //
     // 属性语句()
 }
@@ -106,80 +127,61 @@ pub enum Expr {
     /// 23 | true
     ///
     /// ```
-    字面量 {
-        value: &'static str,
-        line: u32,
-        column: u32,
-    },
+    字面量 { value: &'static str },
     /// ```
     ///
     /// (2,) | (3,2,3)
     ///
     /// ```
-    元组 {
-        elements: Vec<Expr>,
-        line: u32,
-        column: u32,
-    },
+    元组 { elements: Vec<BoxExpr> },
     /// ```
     ///
     /// ()
     ///
     /// ```
-    单元 { line: u32, column: u32 },
+    单元 {},
     /// ```
     ///
     /// a
     ///
     /// ````
-    标识符 {
-        value: &'static str,
-        line: u32,
-        column: u32,
-    },
+    标识符 { value: &'static str },
     /// `1+1`
     二元表达式 {
         operator: &'static str,
-        left: Box<Expr>,
-        right: Box<Expr>,
-        line: u32,
-        column: u32,
+        left: Box<BoxExpr>,
+        right: Box<BoxExpr>,
     },
     /// `d` = `3`
     赋值表达式 {
         operator: &'static str,
-        left: Box<Expr>,
-        right: Box<Expr>,
-        line: u32,
-        column: u32,
+        left: Box<BoxExpr>,
+        right: Box<BoxExpr>,
     },
     /// `{1+1}`
-    块表达式 {
-        body: Vec<Stat>,
-        line: u32,
-        column: u32,
-    },
+    块表达式 { body: Vec<Stat> },
     /// `{a}` | `{a,l:1}`
     对象表达式 {
-        property: Vec<(&'static str, Expr)>,
-        line: u32,
-        column: u32,
+        property: Vec<(&'static str, BoxExpr)>,
     },
     /// \c => 1 | \() => 2 | \(a,b) => 3
     函数表达式 {
         parma: Vec<(Pattern, Option<TypeLiteral>)>,
-        body: Box<Expr>,
-        line: u32,
-        column: u32,
+        body: Box<BoxExpr>,
     },
     函数调用表达式 {
-        callee: Box<Expr>,
-        args: Vec<Expr>,
-        line: u32,
-        column: u32,
+        callee: Box<BoxExpr>,
+        args: Vec<BoxExpr>,
     },
 }
-
+/// 包装了expr和它对应的loc
+#[derive(Debug)]
+pub struct BoxExpr(pub Expr, pub Loc);
+impl BoxExpr {
+    pub fn new(expr: Expr, loc: Loc) -> Self {
+        Self(expr, loc)
+    }
+}
 /// 类型字面量
 ///
 /// `S<T>` <=> `TypeLiteral{name:"s",type_arg:Some(vec![{name:"T",type_arg:None}])}`
@@ -194,21 +196,28 @@ pub enum TypeLiteral {
         name: &'static str,
         /// 类型参数
         type_args: Vec<TypeLiteral>,
+        loc: Loc,
     },
     /// 无参数的类型字面量
     ///
     /// `T`
-    Normal(&'static str),
+    Normal(&'static str, Loc),
+    /// 类型变量
+    ///
+    /// 为了方便解析,泛型参数必须在标识符开头加上一个单引号
+    ///
+    /// T<'a,'b>
+    Variable(&'static str, Loc),
     /// 元组类型字面量
     ///
     /// `(T,U)`
-    Tuple(Vec<TypeLiteral>),
+    Tuple(Vec<TypeLiteral>, Loc),
     /// 字面量 `_`
-    Infer,
+    Infer(Loc),
     /// 对象
-    ObjLiteral(HashMap<&'static str, TypeLiteral>),
+    ObjLiteral(HashMap<&'static str, TypeLiteral>, Loc),
     /// 函数
-    Fn(Vec<TypeLiteral>),
+    Fn(Vec<TypeLiteral>, Loc),
 }
 /// 解析器
 pub struct Parser {
@@ -217,7 +226,7 @@ pub struct Parser {
     /// 当前token
     pub now_token: Token,
     /// 语法树
-    pub ast: Vec<Result<Stat, error::ParseError>>,
+    pub ast: Vec<Result<Stat, ParseError>>,
     /// 上一个token
     pub previous_token: Token,
 }
@@ -323,11 +332,7 @@ impl Parser {
         &self.previous_token
     }
     /// 行为与match_token_value一致,不同之处在于如果匹配不成功就进入恐慌模式
-    fn consume_token_value(
-        &mut self,
-        value_arr: &[&str],
-        message: &str,
-    ) -> Result<(), error::ParseError> {
+    fn consume_token_value(&mut self, value_arr: &[&str], message: &str) -> Result<(), ParseError> {
         if value_arr.iter().any(|c| *c == self.now_token.value) {
             self.eat_token();
             Ok(())
@@ -340,7 +345,7 @@ impl Parser {
         &mut self,
         token_type: TokenType,
         message: &str,
-    ) -> Result<(), error::ParseError> {
+    ) -> Result<(), ParseError> {
         if token_type == self.now_token.token_type {
             self.eat_token();
             Ok(())
@@ -351,14 +356,14 @@ impl Parser {
     /// 进入恐慌模式
     ///
     /// 开始吞token,直到now_token是下个语句开头,或者 `;`
-    fn panic_mode(&mut self, message: &str) -> error::ParseError {
+    fn panic_mode(&mut self, message: &str) -> ParseError {
         while !self.check_token_value(&[";", "{", "let"]) {
             self.eat_token();
         }
-        error::syntax_error(message, self.now_token.line, self.now_token.column)
+        syntax_error(message, self.now_token.line, self.now_token.column)
     }
     /// 解析语句的入口
-    fn parse_stat(&mut self) -> Result<Stat, error::ParseError> {
+    fn parse_stat(&mut self) -> Result<Stat, ParseError> {
         if self.match_token_value(&["let"]) {
             let pattern = self.parse_pattern()?;
             let mut type_annotation = None;
@@ -373,9 +378,22 @@ impl Parser {
                 right: self.parse_expr()?,
             })
         } else if self.match_token_value(&["while"]) {
-            todo!()
+            let expr = self.parse_expr()?;
+            let block = self.parse_block_expr()?;
+            Ok(Stat::while循环 {
+                whilein: expr,
+                block,
+            })
         } else if self.match_token_value(&["for"]) {
-            todo!()
+            let pattern = self.parse_pattern()?;
+            self.consume_token_value(&["in"], "缺失 `in`")?;
+            let for_expr = self.parse_expr()?;
+            let block = self.parse_block_expr()?;
+            Ok(Stat::for循环 {
+                forin: for_expr,
+                pattern,
+                block,
+            })
         } else if self.match_token_value(&["type"]) {
             let type_name = self.parse_type_literal()?;
             self.consume_token_value(&["="], "缺失等于号")?;
@@ -412,11 +430,13 @@ impl Parser {
                 ret_type_annotation,
                 block_expr: self.parse_expr()?,
             })
-        } else if self.match_token_value(&["return"]) {
-            Ok(Stat::返回值语句 {
-                expression: self.parse_expr()?,
-            })
-        } else {
+        }
+        //  else if self.match_token_value(&["return"]) {
+        //     Ok(Stat::返回值语句 {
+        //         expression: self.parse_expr()?,
+        //     })
+        // }
+        else {
             // 以上条件都不满足说明是表达式语句
             let expression = self.parse_expr()?;
             self.match_token_value(&[";"]);
@@ -426,7 +446,8 @@ impl Parser {
     /// 解析类型字面量,例如:
     ///
     /// `S` | `S<T>` | `S<T,U>` | `S<T<U>,P>` | `(S,)` | `(S<T>,U)`
-    fn parse_type_literal(&mut self) -> Result<TypeLiteral, error::ParseError> {
+    fn parse_type_literal(&mut self) -> Result<TypeLiteral, ParseError> {
+        let loc = (self.tokenizer.line, self.tokenizer.column);
         let mut result = vec![self.parse_type_literal_utils()?];
         while self.match_token_value(&["->"]) {
             result.push(self.parse_type_literal_utils()?);
@@ -434,22 +455,25 @@ impl Parser {
         if result.len() == 1 {
             Ok(result.pop().unwrap())
         } else {
-            Ok(TypeLiteral::Fn(result))
+            Ok(TypeLiteral::Fn(result, loc))
         }
     }
     /// 辅助函数
-    fn parse_type_literal_utils(&mut self) -> Result<TypeLiteral, error::ParseError> {
+    fn parse_type_literal_utils(&mut self) -> Result<TypeLiteral, ParseError> {
+        let loc = (self.tokenizer.line, self.tokenizer.column);
         if self.match_token_value(&["("]) {
             if self.match_token_value(&[")"]) {
-                Ok(TypeLiteral::Tuple(vec![]))
-            } else if self.check_token_type(TokenType::标识符) || self.check_token_value(&["_"])
+                Ok(TypeLiteral::Tuple(vec![], loc))
+            } else if self.check_token_type(TokenType::标识符)
+                || self.check_token_value(&["_"])
+                || self.check_token_type(TokenType::泛型专用标识符)
             {
                 let mut p = vec![self.parse_type_literal()?];
                 while !self.match_token_value(&[")"]) {
                     self.consume_token_value(&[","], "")?;
                     p.push(self.parse_type_literal()?);
                 }
-                Ok(TypeLiteral::Tuple(p))
+                Ok(TypeLiteral::Tuple(p, loc))
             } else {
                 Err(self.panic_mode("不合法的类型标注"))
             }
@@ -464,12 +488,20 @@ impl Parser {
                 Ok(TypeLiteral::Generic {
                     name,
                     type_args: type_arg,
+                    loc,
                 })
             } else {
-                Ok(TypeLiteral::Normal(name))
+                Ok(TypeLiteral::Normal(name, loc))
+            }
+        } else if self.match_token_type(TokenType::泛型专用标识符) {
+            if self.check_token_value(&["<"]) {
+                Err(self.panic_mode("泛型参数不允许有自己的参数"))
+            } else {
+                let name = self.get_previous_token().value;
+                Ok(TypeLiteral::Variable(name, loc))
             }
         } else if self.match_token_value(&["_"]) {
-            Ok(TypeLiteral::Infer)
+            Ok(TypeLiteral::Infer(loc))
         } else if self.match_token_value(&["{"]) {
             if self.match_token_value(&["}"]) {
                 Err(self.panic_mode("使用 `()` 来代替"))
@@ -484,14 +516,14 @@ impl Parser {
                     field_table.insert(field_name, self.parse_type_literal()?);
                     self.match_token_value(&[";", ","]);
                 }
-                Ok(TypeLiteral::ObjLiteral(field_table))
+                Ok(TypeLiteral::ObjLiteral(field_table, loc))
             }
         } else {
             Err(self.panic_mode("不合法的类型标注"))
         }
     }
     /// 解析 "模式"
-    fn parse_pattern(&mut self) -> Result<Pattern, error::ParseError> {
+    fn parse_pattern(&mut self) -> Result<Pattern, ParseError> {
         if self.match_token_value(&["("]) {
             if self.match_token_value(&[")"]) {
                 return Err(self.panic_mode("无意义的模式,用 `_` 代替"));
@@ -562,59 +594,59 @@ impl Parser {
         }
     }
     /// 解析表达式的入口
-    fn parse_expr(&mut self) -> Result<Expr, error::ParseError> {
+    fn parse_expr(&mut self) -> Result<BoxExpr, ParseError> {
         self.assignment()
     }
     /// 函数调用表达式
-    fn call(&mut self) -> Result<Expr, error::ParseError> {
+    fn call(&mut self) -> Result<BoxExpr, ParseError> {
         let column = self.get_previous_token().column;
         let line = self.get_previous_token().line;
-        let mut expr: Expr = self.primary_expr()?;
-        if self.match_token_value(&["("]) {
+        let mut expr = self.primary_expr()?;
+        while self.match_token_value(&["("]) {
             if self.match_token_value(&[")"]) {
-                expr = Expr::函数调用表达式 {
-                    args: vec![],
-                    callee: Box::new(expr),
-                    line,
-                    column,
-                };
+                expr = BoxExpr::new(
+                    Expr::函数调用表达式 {
+                        args: vec![],
+                        callee: Box::new(expr),
+                    },
+                    (line, column),
+                );
             } else {
                 let mut args = vec![];
-                crate::do_while!(
-                    { args.push(self.primary_expr()?) },
-                    self.match_token_value(&[","])
+                crate::do_while!({ args.push(self.call()?) }, self.match_token_value(&[","]));
+                expr = BoxExpr::new(
+                    Expr::函数调用表达式 {
+                        args,
+                        callee: Box::new(expr),
+                    },
+                    (line, column),
                 );
-                expr = Expr::函数调用表达式 {
-                    args,
-                    callee: Box::new(expr),
-                    line,
-                    column,
-                };
                 self.consume_token_value(&[")"], "缺失 `)`")?;
             }
         }
         Ok(expr)
     }
     /// 乘除表达式
-    fn factor(&mut self) -> Result<Expr, error::ParseError> {
-        let mut expr: Expr = self.call()?;
+    fn factor(&mut self) -> Result<BoxExpr, ParseError> {
+        let mut expr = self.call()?;
         let column = self.get_previous_token().column;
         let line = self.get_previous_token().line;
         while self.match_token_value(&["*", "/"]) {
             let operator = self.get_previous_token().value;
             let right = self.call()?;
-            expr = Expr::二元表达式 {
-                operator,
-                left: Box::new(expr),
-                right: Box::new(right),
-                line,
-                column,
-            };
+            expr = BoxExpr::new(
+                Expr::二元表达式 {
+                    operator,
+                    left: Box::new(expr),
+                    right: Box::new(right),
+                },
+                (line, column),
+            );
         }
         Ok(expr)
     }
     /// 加减表达式
-    fn term(&mut self) -> Result<Expr, error::ParseError> {
+    fn term(&mut self) -> Result<BoxExpr, ParseError> {
         // 加减法优先级很低
         // 首先调用乘法解析,之后的表达式都会递归解析
         let mut expr = self.factor()?;
@@ -628,38 +660,40 @@ impl Parser {
             let right = self.factor()?;
             // 它本身是新表达式的左侧
             // 现在可以生成一颗表达式树了
-            expr = Expr::二元表达式 {
-                operator,
-                left: Box::new(expr),
-                right: Box::new(right),
-                line,
-                column,
-            };
+            expr = BoxExpr::new(
+                Expr::二元表达式 {
+                    operator,
+                    left: Box::new(expr),
+                    right: Box::new(right),
+                },
+                (line, column),
+            );
             // 谁不优先谁就在函数调用栈的上层
             // 然后立即调用比自己优先一层的解析函数
         }
         Ok(expr)
     }
     /// 赋值表达式
-    fn assignment(&mut self) -> Result<Expr, error::ParseError> {
+    fn assignment(&mut self) -> Result<BoxExpr, ParseError> {
         let mut expr = self.term();
         let column = self.get_previous_token().column;
         let line = self.get_previous_token().line;
         while self.match_token_value(&["="]) {
             let right = self.assignment();
             let operator = self.get_previous_token().value;
-            expr = Ok(Expr::赋值表达式 {
-                operator,
-                left: Box::new(expr?),
-                right: Box::new(right?),
-                line,
-                column,
-            });
+            expr = Ok(BoxExpr::new(
+                Expr::赋值表达式 {
+                    operator,
+                    left: Box::new(expr?),
+                    right: Box::new(right?),
+                },
+                (line, column),
+            ));
         }
         expr
     }
     /// 块表达式
-    fn block_expr(&mut self) -> Result<Expr, error::ParseError> {
+    fn parse_block_expr(&mut self) -> Result<BoxExpr, ParseError> {
         let Token {
             mut line,
             mut column,
@@ -673,10 +707,10 @@ impl Parser {
                 break;
             }
         }
-        Ok(Expr::块表达式 { body, line, column })
+        Ok(BoxExpr::new(Expr::块表达式 { body }, (line, column)))
     }
     /// ### 优先级最高,基本表达式
-    pub fn primary_expr(&mut self) -> Result<Expr, error::ParseError> {
+    pub fn primary_expr(&mut self) -> Result<BoxExpr, ParseError> {
         if self.match_token_type(TokenType::数字字面量)
             || self.match_token_type(TokenType::布尔值)
             || self.match_token_type(TokenType::字符串)
@@ -687,11 +721,7 @@ impl Parser {
                 line,
                 ..
             } = &self.get_previous_token();
-            Ok(Expr::字面量 {
-                value,
-                column: *column,
-                line: *line,
-            })
+            Ok(BoxExpr::new(Expr::字面量 { value }, (*line, *column)))
         } else if self.match_token_type(TokenType::标识符) {
             let Token {
                 value,
@@ -699,16 +729,12 @@ impl Parser {
                 line,
                 ..
             } = &self.get_previous_token();
-            Ok(Expr::标识符 {
-                value,
-                column: *column,
-                line: *line,
-            })
+            Ok(BoxExpr::new(Expr::标识符 { value }, (*line, *column)))
         } else if self.match_token_type(TokenType::左括号) {
             let column = self.get_previous_token().column;
             let line = self.get_previous_token().line;
             if self.match_token_type(TokenType::右括号) {
-                return Ok(Expr::单元 { line, column });
+                return Ok(BoxExpr::new(Expr::单元 {}, (line, column)));
             }
             let expr = self.parse_expr()?;
             if self.match_token_value(&[","]) {
@@ -717,11 +743,7 @@ impl Parser {
                     tuple.push(self.parse_expr()?);
                     self.match_token_value(&[","]);
                 }
-                Ok(Expr::元组 {
-                    elements: tuple,
-                    line,
-                    column,
-                })
+                Ok(BoxExpr::new(Expr::元组 { elements: tuple }, (line, column)))
             } else {
                 self.consume_token_type(TokenType::右括号, "缺失右括号")?;
                 Ok(expr)
@@ -730,11 +752,10 @@ impl Parser {
             let Token { line, column, .. } = self.now_token;
             self.match_token_value(&["{"]);
             if self.match_token_value(&["}"]) {
-                return Ok(Expr::块表达式 {
-                    body: vec![],
-                    line,
-                    column,
-                });
+                return Ok(BoxExpr::new(
+                    Expr::块表达式 { body: vec![] },
+                    (line, column),
+                ));
             };
             if self.check_token_type(TokenType::标识符) {
                 let mut property = vec![];
@@ -749,22 +770,19 @@ impl Parser {
                     let expr = if self.match_token_value(&[":"]) {
                         self.parse_expr()?
                     } else {
-                        Expr::标识符 {
-                            value: property_name,
-                            line,
-                            column,
-                        }
+                        BoxExpr::new(
+                            Expr::标识符 {
+                                value: property_name,
+                            },
+                            (line, column),
+                        )
                     };
                     property.push((property_name, expr));
                     self.match_token_value(&[","]);
                 }
-                Ok(Expr::对象表达式 {
-                    property,
-                    line,
-                    column,
-                })
+                Ok(BoxExpr::new(Expr::对象表达式 { property }, (line, column)))
             } else {
-                self.block_expr()
+                self.parse_block_expr()
             }
         } else if self.match_token_value(&["\\"]) {
             let line = self.get_previous_token().line;
@@ -774,12 +792,13 @@ impl Parser {
                 // 空参数
                 if self.match_token_value(&[")"]) {
                     self.consume_token_value(&["=>"], "缺失 `=>`")?;
-                    Ok(Expr::函数表达式 {
-                        parma: vec![],
-                        body: Box::new(self.parse_expr()?),
-                        line,
-                        column,
-                    })
+                    Ok(BoxExpr::new(
+                        Expr::函数表达式 {
+                            parma: vec![],
+                            body: Box::new(self.parse_expr()?),
+                        },
+                        (line, column),
+                    ))
                 } else {
                     let mut parma = vec![];
                     crate::do_while!(
@@ -795,12 +814,13 @@ impl Parser {
                     );
                     self.consume_token_value(&[")"], "缺失 `)`")?;
                     self.consume_token_value(&["=>"], "缺失 `=>`")?;
-                    Ok(Expr::函数表达式 {
-                        parma,
-                        body: Box::new(self.parse_expr()?),
-                        line,
-                        column,
-                    })
+                    Ok(BoxExpr::new(
+                        Expr::函数表达式 {
+                            parma,
+                            body: Box::new(self.parse_expr()?),
+                        },
+                        (line, column),
+                    ))
                 }
             } else {
                 // 单参数
@@ -810,12 +830,13 @@ impl Parser {
                     type_annotation = Some(self.parse_type_literal()?);
                 }
                 self.consume_token_value(&["=>"], "缺失 `=>`")?;
-                Ok(Expr::函数表达式 {
-                    parma: vec![(parma, type_annotation)],
-                    body: Box::new(self.parse_expr()?),
-                    line,
-                    column,
-                })
+                Ok(BoxExpr::new(
+                    Expr::函数表达式 {
+                        parma: vec![(parma, type_annotation)],
+                        body: Box::new(self.parse_expr()?),
+                    },
+                    (line, column),
+                ))
             }
         } else {
             Err(self.panic_mode("需要 表达式"))
