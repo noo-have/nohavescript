@@ -5,6 +5,7 @@ mod macros;
 mod parser;
 mod tokenizer;
 mod translate;
+mod unionfind;
 mod vm;
 fn main() {
     let mut c = std::env::args();
@@ -18,13 +19,26 @@ fn main() {
         // 第一个参数为""或当前路径
         for arg in c {
             let arg = reg.captures(&arg).unwrap().get(1).unwrap().as_str();
-            debug!("{:?}", arg);
             match arg {
                 "help" => {}
                 "run" => {
+                    let mut a = analyzer::Analyzer::new();
                     // let vm = vm::VM::new();
                     // parser.set_gen_bytecode(true);
+                    let now = std::time::Instant::now();
                     parser.start();
+                    parser
+                        .ast
+                        .iter()
+                        .try_for_each(|stat| {
+                            if let Ok(stat) = stat {
+                                a.analysis_stat(stat)
+                            } else {
+                                todo!()
+                            }
+                        })
+                        .unwrap();
+                    println!("解析用时{:?}", std::time::Instant::now() - now);
                     // vm::run(bytecode)
                 }
                 "translate" => {
@@ -63,33 +77,45 @@ fn repl() -> Result<(), String> {
                 }
             }
             Err(err) => {
-                writeln!(std::io::stdout(), "{err}").map_err(|e| e.to_string())?;
+                writeln!(std::io::stdout(), "{err:?}").map_err(|e| e.to_string())?;
                 std::io::stdout().flush().map_err(|e| e.to_string())?;
             }
         }
     }
     Ok(())
 }
-fn respond(
-    line: &str,
-    parser: &mut Parser,
-    analyzer: &mut analyzer::Analyzer,
+fn respond<'a, 'b, 'c>(
+    line: &'a str,
+    parser: &'b mut Parser,
+    analyzer: &'c mut analyzer::Analyzer<'_>,
 ) -> Result<bool, error::ParseError> {
     parser.ast.clear();
     parser.set_source_code(line);
     let now = std::time::Instant::now();
     parser.start();
-    parser.ast.iter().for_each(|stat| {
-        if let Ok(stat) = stat {
-            analyzer.analysis_stat(stat);
-        }
-    });
+    // let mut c = vec![Ok(Stat::表达式语句 {
+    //     expression: BoxExpr(parser::Expr::单元 {}, (0, 0)),
+    // })];
+    // std::mem::swap(&mut c, &mut parser.ast);
+    // let y = c.into_iter().try_for_each(|stat| {
+    //     analyzer.analysis_stat({
+    //         if let Ok(stat) = stat {
+    //             // stat
+    //             analyzer.analysis_stat(&stat)?;
+    //             fn x(a: &Stat) {}
+    //             // x(stat);
+    //             todo!()
+    //         } else {
+    //             todo!()
+    //         }
+    //     })
+    // })?;
     println!("解析用时{:?}", std::time::Instant::now() - now);
     Ok(false)
 }
 
 fn read_line() -> Result<String, String> {
-    write!(std::io::stdout(), "$ ").map_err(|e| e.to_string())?;
+    write!(std::io::stdout(), "$>").map_err(|e| e.to_string())?;
     std::io::stdout().flush().map_err(|e| e.to_string())?;
     let mut buffer = String::new();
     std::io::stdin()
@@ -152,11 +178,20 @@ mod test_all {
         fn parse_call_expr() {
             let mut p = crate::parser::Parser::new(r"dss(1,4,(1,2),\e => {let x = 23;})");
             p.start();
-            crate::debug!("{:#?}", p.ast);
         }
         #[test]
         fn parse_obj_expr() {
             let mut p = crate::parser::Parser::new(r"{a:23,d} {let p = 2;}");
+            p.start();
+        }
+        #[test]
+        fn parse_all_test() {
+            let mut p = crate::parser::Parser::new(
+                r"
+            let a =23
+            let {x:a} = ()
+            let c = \(s,d) => {a:1,b:2};",
+            );
             p.start();
             crate::debug!("{:#?}", p.ast);
         }
@@ -195,7 +230,7 @@ mod test_all {
         // 不给参数的泛型
         fn analyzer_type3() {
             let mut analyzer = Analyzer::new();
-            let mut parser = Parser::new("type a<T> = () let p:a =2");
+            let mut parser = Parser::new("type a<'T> = () let p:a =2");
             parser.start();
             parser.ast.iter().for_each(|stat| {
                 if let Ok(stat) = stat {
@@ -205,18 +240,67 @@ mod test_all {
         }
         #[test]
         fn analyzer_type4() -> Result<(), error::ParseError> {
+            // let mut pa = Parser::new("s(1)(3)");
+            // pa.start();
+            // println!("{:#?}", pa.ast);
             let mut analyzer = Analyzer::new();
             let mut parser = Parser::new(
-                "type a<A,B,C,D,E,F> = A -> C -> (B) -> (D,E,(),F);let a :a<(),(),num,bool,(),()> = 123",
+                r#"
+                type A<'a,'b> = 'a -> 'b;
+                type B<'a>  = ('a,Num)
+                let p:Num -> _ -> _ = \(a,b:'T) =>{
+                    let c:'T = "aw";
+                    ()
+                };
+                let a:A<_,_> = \c => \o => 2;
+                let b:B<_> = ((),1)
+                // error
+                let ccc:Bool = a(true);
+                let c = \c => 1
+                let _a = c(2)
+                let _a = c(())
+                let cx = \(a,b) => ()
+                // error
+                let _a = cx(1)(())()
+                "#,
             );
+            let p = match 23 {
+                (23 | 12) => 1,
+                12 => 3,
+                _ => 1,
+            };
             parser.start();
-            println!("{:?}", parser.ast);
-            parser.ast.iter().for_each(|stat| {
-                if let Ok(stat) = stat {
-                    analyzer.analysis_stat(stat).unwrap();
-                }
-            });
+            // println!("{:?}", parser.ast);
+            parser
+                .ast
+                .into_iter()
+                .collect::<Result<Vec<_>, _>>()?
+                .iter()
+                .try_for_each(|stat| analyzer.analysis_stat(stat))?;
             Ok(())
+        }
+        #[test]
+        fn analyzer_type5() {
+            let mut a = Analyzer::new();
+            use crate::analyzer::{BasicType, Type};
+            let t0 = Type::TVar(0, 0);
+            let t1 = Type::TVar(1, 0);
+            let t2 = Type::TVar(2, 0);
+            let q0 = Type::QVar(0);
+            let q1 = Type::QVar(1);
+            let str = Type::Basic(BasicType::Str);
+            let unit = Type::Basic(BasicType::Unit);
+            let num = Type::Basic(BasicType::Num);
+            let bool = Type::Basic(BasicType::Bool);
+            let bool_num = Type::Fn(Box::new(bool.clone()), Box::new(num.clone()));
+            let bool_bool_num = Type::Fn(
+                Box::new(bool.clone()),
+                Box::new(Type::Fn(Box::new(bool), Box::new(num))),
+            );
+            a.type_env.unify(&t0, &bool_num).unwrap();
+            a.type_env.unify(&t1, &bool_bool_num).unwrap();
+            a.type_env.unify(&t2, &bool_bool_num).unwrap();
+            a.type_env.unify(&t0, &t2).unwrap();
         }
     }
     mod vm_test {
